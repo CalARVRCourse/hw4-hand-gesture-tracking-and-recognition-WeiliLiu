@@ -144,20 +144,31 @@ def CaptureImages(directory, part=1, tune=False):
                 for cnt in contours[:1]:
                     defects = cv2.convexityDefects(cnt, hull)
                     if (not isinstance(defects, type(None))):
+                        fingerCount = 0
                         for i in range(defects.shape[0]):
-                            for i in range(defects.shape[0]):
-                                s, e, f, d = defects[i, 0]
-                                start = tuple(cnt[s][0])
-                                end = tuple(cnt[e][0])
-                                far = tuple(cnt[f][0])
+                            s, e, f, d = defects[i, 0]
+                            start = tuple(cnt[s][0])
+                            end = tuple(cnt[e][0])
+                            far = tuple(cnt[f][0])
 
+                            # Defect check
+                            c_squared = (end[0] - start[0]) ** 2 + (end[1] - start[1]) ** 2
+                            a_squared = (far[0] - start[0]) ** 2 + (far[1] - start[1]) ** 2
+                            b_squared = (end[0] - far[0]) ** 2 + (end[1] - far[1]) ** 2
+                            angle = np.arccos((a_squared + b_squared - c_squared) / (2 * np.sqrt(a_squared * b_squared)))
+
+                            if angle <= np.pi / 3:
+                                fingerCount += 1
                                 cv2.line(thresh, start, end, [0, 255, 0], 2)
-                                cv2.circle(thresh, far, 5, [0, 0, 255], -1)
+                                cv2.circle(thresh, far, 4, [0, 0, 255], -1)
+
+                        text = "Finger count: " + str(fingerCount + int(fingerCount != 0))
+                        cv2.putText(thresh, text, (10, 50), cv2.FONT_HERSHEY_SIMPLEX, 1, (209, 80, 0, 255), 3)
                 # Print center coordinates and the area of the contour
                 M = cv2.moments(largestContour)
                 cX = int(M["m10"] / M["m00"])
                 cY = int(M["m01"] / M["m00"])
-                logging.info('Center: ({}, {}), Area: {}'.format(cX, cY, M))
+                # logging.info('Center: ({}, {}), Area: {}'.format(cX, cY, M))
             # display the current image
             cv2.imshow("Display", thresh)
 
