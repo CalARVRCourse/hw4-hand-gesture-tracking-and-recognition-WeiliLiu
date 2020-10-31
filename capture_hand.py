@@ -1,6 +1,8 @@
 import cv2
 import numpy as np
 import glob
+import argparse
+import logging
 
 # Global Vars
 window_name = "Hand Capture"
@@ -17,7 +19,7 @@ max_binary_value = 255
 # when the "Space" key is pressed.
 # directory: should be a string corresponding to the name of an existing 
 # directory
-def CaptureImages(directory):
+def CaptureImages(directory, part=1, tune=False):
     # Open the camera for capture
     # the 0 value should default to the webcam, but you may need to change this
     # for your camera, especially if you are using a camera besides the default
@@ -83,47 +85,82 @@ def CaptureImages(directory):
         # Binarize the image
         gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
         threshold_value = cv2.getTrackbarPos('threshold', window_name)
-        ret, thresh = cv2.threshold(gray, 0, threshold_value, cv2.THRESH_BINARY_INV+cv2.THRESH_OTSU)
 
-        # Connected components analysis
-        ret, markers, stats, centroids = cv2.connectedComponentsWithStats(thresh, ltype=cv2.CV_16U)
-        markers = np.array(markers, dtype=np.uint8)
-        label_hue = np.uint8(179 * markers / np.max(markers))
-        blank_ch = 255 * np.ones_like(label_hue)
-        labeled_img = cv2.merge([label_hue, blank_ch, blank_ch])
-        labeled_img = cv2.cvtColor(labeled_img, cv2.COLOR_HSV2BGR)
-        labeled_img[label_hue==0] = 0
+        if part == 1:
+            ret, thresh = cv2.threshold(gray, 0, threshold_value, cv2.THRESH_BINARY_INV+cv2.THRESH_OTSU)
+            # display the current image
+            cv2.imshow("Display", thresh)
 
-        if (ret > 2):
-            try:
-                statsSortedByArea = stats[np.argsort(stats[:, 4])]
-                roi = statsSortedByArea[-3][0:4]
-                x, y, w, h = roi
-                subImg = labeled_img[y:y+h, x:x+w]
-                subImg = cv2.cvtColor(subImg, cv2.COLOR_BGR2GRAY)
-                _, contours, _ = cv2.findContours(subImg, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
-                maxCntLength = 0
-                for i in range(0, len(contours)):
-                    cntLength = len(contours[i])
-                    if (cntLength > maxCntLength):
-                        cnt = contours[i]
-                        maxCntLength = cntLength
-                    if (maxCntLength >= 5):
-                        ellipseParam = cv2.fitEllipse(cnt)
-                        subImg = cv2.cvtColor(subImg, cv2.COLOR_GRAY2RGB)
-                        subImg = cv2.ellipse(subImg, ellipseParam, (0, 255, 0), 2)
-                    
-                    (x, y), (MA, ma), angle = cv2.fitEllipse(cnt)
-                    print("(x, y) = ({}, {}), (MA, ma) = ({}, {}), angle = {}".format(x, y, MA, ma, angle))
+        if part == 2:
+            ret, thresh = cv2.threshold(gray, 0, threshold_value, cv2.THRESH_BINARY_INV+cv2.THRESH_OTSU)
+            # Connected components analysis
+            ret, markers, stats, centroids = cv2.connectedComponentsWithStats(thresh, ltype=cv2.CV_16U)
+            markers = np.array(markers, dtype=np.uint8)
+            label_hue = np.uint8(179 * markers / np.max(markers))
+            blank_ch = 255 * np.ones_like(label_hue)
+            labeled_img = cv2.merge([label_hue, blank_ch, blank_ch])
+            labeled_img = cv2.cvtColor(labeled_img, cv2.COLOR_HSV2BGR)
+            labeled_img[label_hue==0] = 0
 
-                    subImg = cv2.resize(subImg, (0, 0), fx=3, fy=3)
-                    cv2.imshow("ROI "+str(2), subImg)
-                    cv2.waitKey(1)
-            except:
-                print("No hand found")
+            if (ret > 2):
+                try:
+                    statsSortedByArea = stats[np.argsort(stats[:, 4])]
+                    roi = statsSortedByArea[-3][0:4]
+                    x, y, w, h = roi
+                    subImg = labeled_img[y:y+h, x:x+w]
+                    subImg = cv2.cvtColor(subImg, cv2.COLOR_BGR2GRAY)
+                    _, contours, _ = cv2.findContours(subImg, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
+                    maxCntLength = 0
+                    for i in range(0, len(contours)):
+                        cntLength = len(contours[i])
+                        if (cntLength > maxCntLength):
+                            cnt = contours[i]
+                            maxCntLength = cntLength
+                        if (maxCntLength >= 5):
+                            ellipseParam = cv2.fitEllipse(cnt)
+                            subImg = cv2.cvtColor(subImg, cv2.COLOR_GRAY2RGB)
+                            subImg = cv2.ellipse(subImg, ellipseParam, (0, 255, 0), 2)
+                        
+                        (x, y), (MA, ma), angle = cv2.fitEllipse(cnt)
+                        print("(x, y) = ({}, {}), (MA, ma) = ({}, {}), angle = {}".format(x, y, MA, ma, angle))
 
-        # display the current image
-        cv2.imshow("Display", labeled_img)
+                        subImg = cv2.resize(subImg, (0, 0), fx=3, fy=3)
+                        cv2.imshow("ROI "+str(2), subImg)
+                        cv2.waitKey(1)
+                except:
+                    print("No hand found")
+
+            # display the current image
+            cv2.imshow("Display", labeled_img)
+
+        if part == 3:
+            ret, thresh = cv2.threshold(gray, 0, threshold_value, cv2.THRESH_OTSU)
+            _, contours, _ = cv2.findContours(thresh, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
+            contours = sorted(contours, key=cv2.contourArea, reverse=True)
+            thresh = cv2.cvtColor(thresh, cv2.COLOR_GRAY2BGR)
+            if len(contours) > 1:
+                largestContour = contours[0]
+                hull = cv2.convexHull(largestContour, returnPoints=False)
+                for cnt in contours[:1]:
+                    defects = cv2.convexityDefects(cnt, hull)
+                    if (not isinstance(defects, type(None))):
+                        for i in range(defects.shape[0]):
+                            for i in range(defects.shape[0]):
+                                s, e, f, d = defects[i, 0]
+                                start = tuple(cnt[s][0])
+                                end = tuple(cnt[e][0])
+                                far = tuple(cnt[f][0])
+
+                                cv2.line(thresh, start, end, [0, 255, 0], 2)
+                                cv2.circle(thresh, far, 5, [0, 0, 255], -1)
+                # Print center coordinates and the area of the contour
+                M = cv2.moments(largestContour)
+                cX = int(M["m10"] / M["m00"])
+                cY = int(M["m01"] / M["m00"])
+                logging.info('Center: ({}, {}), Area: {}'.format(cX, cY, M))
+            # display the current image
+            cv2.imshow("Display", thresh)
+
         # wait for 1ms or key press
         k = cv2.waitKey(1) #k is the key pressed
         if k == 27 or k == 113: #27, 113 are ascii for escape and q respectively
@@ -137,9 +174,18 @@ def CaptureImages(directory):
             img_counter += 1
     cam.release()
 
+def get_args():
+    parser = argparse.ArgumentParser(description='CS294-137 HW4 Gesture Recognition')
+    parser.add_argument('-p', '--part', metavar='E', type=int, default=1, help='Part of the homework to run', dest='part')
+    parser.add_argument('-t', '--tune', metavar='T', type=str, nargs='?', const=True, default=False, help='Use the trackbar to tune parameters', dest='tune')
+    return parser.parse_args()
+
 # A function that does nothing
 def nothing(x):
     pass
 
 if __name__ == "__main__":
-    CaptureImages("Hand-images")
+    logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
+    args = get_args()
+    print(args)
+    CaptureImages("Hand-images", part=args.part)
