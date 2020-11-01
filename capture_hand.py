@@ -3,6 +3,7 @@ import numpy as np
 import glob
 import argparse
 import logging
+import pyautogui
 
 # Global Vars
 window_name = "Hand Capture"
@@ -14,18 +15,24 @@ gaussian_blur_max = 20
 morpho_kernel_min = 1
 morpho_kernel_max = 20
 max_binary_value = 255
+# Camera Resolutions
+cam_width_res = 1280
+cam_height_res = 720
 
 # This function records images from the connected camera to specified directory 
 # when the "Space" key is pressed.
 # directory: should be a string corresponding to the name of an existing 
 # directory
-def CaptureImages(directory, part=1, tune=False):
+def CaptureImages(directory, part=1, tune=False, heuristic=False):
     # Open the camera for capture
     # the 0 value should default to the webcam, but you may need to change this
     # for your camera, especially if you are using a camera besides the default
     cam = cv2.VideoCapture(0)
     cam.set(cv2.CAP_PROP_AUTO_EXPOSURE, 0.25) # 0.25 turns off auto exp
     cam.set(cv2.CAP_PROP_AUTO_WB, 0.25) # 0.25 turns off auto wb
+    # Setting camera resolutions
+    cam.set(cv2.CAP_PROP_FRAME_WIDTH, cam_width_res)
+    cam.set(cv2.CAP_PROP_FRAME_HEIGHT, cam_height_res)
     cv2.namedWindow(window_name)
 
     # Create Trackbar to choose values for HSV lower bound
@@ -42,12 +49,43 @@ def CaptureImages(directory, part=1, tune=False):
     # Create Trackbar to choose value for threshold
     cv2.createTrackbar('threshold', window_name, 0, 255, nothing)
 
+    # Variables for decreasing opencv noise
+    last_three_frames = []
+    r_vals = []
+    g_vals = []
+    b_vals = []
+    (rAvg, gAvg, bAvg) = (None, None, None)
+    total = 0
+
     img_counter = 0
     # Read until user quits
     while True:
         ret, frame = cam.read()
         if not ret:
             break
+        
+        (B, G, R) = cv2.split(frame.astype("float"))
+        if rAvg is None or total == 3:
+            rAvg, gAvg, bAvg = R, G, B
+            total = 0
+        else:
+            rAvg = ((total * rAvg) + (1 * R)) / (total + 1.0)
+            gAvg = ((total * gAvg) + (1 * G)) / (total + 1.0)
+            bAvg = ((total * bAvg) + (1 * B)) / (total + 1.0)
+        total += 1
+        frame = cv2.merge([bAvg, gAvg, rAvg]).astype("uint8")
+        print(np.shape(frame))
+
+        if part == 0:
+            # display the current image
+            cv2.imshow("Display", frame)
+
+            # wait for 1ms or key press
+            k = cv2.waitKey(1) #k is the key pressed
+            if k == 27 or k == 113: #27, 113 are ascii for escape and q respectively
+                #exit
+                break
+            continue
 
         # Extract current lower_HSV values
         H_lo, S_lo, V_lo = cv2.getTrackbarPos('H_lo', window_name), cv2.getTrackbarPos('S_lo', window_name), cv2.getTrackbarPos('V_lo', window_name)
@@ -89,9 +127,9 @@ def CaptureImages(directory, part=1, tune=False):
         if part == 1:
             ret, thresh = cv2.threshold(gray, 0, threshold_value, cv2.THRESH_BINARY_INV+cv2.THRESH_OTSU)
             # display the current image
-            cv2.imshow("Display", thresh)
+            cv2.imshow("Display", frame)
 
-        if part == 2:
+        if part == 2 or part == 4:
             ret, thresh = cv2.threshold(gray, 0, threshold_value, cv2.THRESH_BINARY_INV+cv2.THRESH_OTSU)
             # Connected components analysis
             ret, markers, stats, centroids = cv2.connectedComponentsWithStats(thresh, ltype=cv2.CV_16U)
@@ -124,6 +162,11 @@ def CaptureImages(directory, part=1, tune=False):
                         (x, y), (MA, ma), angle = cv2.fitEllipse(cnt)
                         print("(x, y) = ({}, {}), (MA, ma) = ({}, {}), angle = {}".format(x, y, MA, ma, angle))
 
+                        if part == 4:
+                            pyautogui.moveTo(cX, cY, duration=0.02, tween=pyautogui.easeInOutQuad)
+                            if fingerCount == 2:
+                                pyautogui.click()
+
                         subImg = cv2.resize(subImg, (0, 0), fx=3, fy=3)
                         cv2.imshow("ROI "+str(2), subImg)
                         cv2.waitKey(1)
@@ -134,7 +177,7 @@ def CaptureImages(directory, part=1, tune=False):
             cv2.imshow("Display", labeled_img)
 
         if part == 3:
-            ret, thresh = cv2.threshold(gray, 0, threshold_value, cv2.THRESH_OTSU)
+            ret, thresh = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY+cv2.THRESH_OTSU)
             _, contours, _ = cv2.findContours(thresh, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
             contours = sorted(contours, key=cv2.contourArea, reverse=True)
             thresh = cv2.cvtColor(thresh, cv2.COLOR_GRAY2BGR)
@@ -151,14 +194,18 @@ def CaptureImages(directory, part=1, tune=False):
                             end = tuple(cnt[e][0])
                             far = tuple(cnt[f][0])
 
-                            # Defect check
-                            c_squared = (end[0] - start[0]) ** 2 + (end[1] - start[1]) ** 2
-                            a_squared = (far[0] - start[0]) ** 2 + (far[1] - start[1]) ** 2
-                            b_squared = (end[0] - far[0]) ** 2 + (end[1] - far[1]) ** 2
-                            angle = np.arccos((a_squared + b_squared - c_squared) / (2 * np.sqrt(a_squared * b_squared)))
+                            if heuristic:
+                                # Defect check
+                                c_squared = (end[0] - start[0]) ** 2 + (end[1] - start[1]) ** 2
+                                a_squared = (far[0] - start[0]) ** 2 + (far[1] - start[1]) ** 2
+                                b_squared = (end[0] - far[0]) ** 2 + (end[1] - far[1]) ** 2
+                                angle = np.arccos((a_squared + b_squared - c_squared) / (2 * np.sqrt(a_squared * b_squared)))
 
-                            if angle <= np.pi / 3:
-                                fingerCount += 1
+                                if angle <= np.pi / 3:
+                                    fingerCount += 1
+                                    cv2.line(thresh, start, end, [0, 255, 0], 2)
+                                    cv2.circle(thresh, far, 4, [0, 0, 255], -1)
+                            else:
                                 cv2.line(thresh, start, end, [0, 255, 0], 2)
                                 cv2.circle(thresh, far, 4, [0, 0, 255], -1)
 
@@ -189,6 +236,7 @@ def get_args():
     parser = argparse.ArgumentParser(description='CS294-137 HW4 Gesture Recognition')
     parser.add_argument('-p', '--part', metavar='E', type=int, default=1, help='Part of the homework to run', dest='part')
     parser.add_argument('-t', '--tune', metavar='T', type=str, nargs='?', const=True, default=False, help='Use the trackbar to tune parameters', dest='tune')
+    parser.add_argument('-hf', '--heuristic-filtering', metavar='H', type=str, nargs='?', const=True, default=False, help='Apply heuristic filtering to defects', dest='heu_filtering')
     return parser.parse_args()
 
 # A function that does nothing
@@ -199,4 +247,4 @@ if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
     args = get_args()
     print(args)
-    CaptureImages("Hand-images", part=args.part)
+    CaptureImages("Hand-images", part=args.part, tune=args.tune, heuristic=args.heu_filtering)
