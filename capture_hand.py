@@ -1,8 +1,8 @@
+import argparse
+import glob
+import logging
 import cv2
 import numpy as np
-import glob
-import argparse
-import logging
 import pyautogui
 
 # Global Vars
@@ -23,8 +23,8 @@ cam_height_res = 720
 # pyautogui constants
 offsetX = 0
 offsetY = 0
-scaleX = screen_width_res / cam_width_res
-scaleY = screen_height_res / cam_height_res
+scaleX = screen_height_res / cam_height_res
+scaleY = screen_width_res / cam_width_res
 
 # This function records images from the connected camera to specified directory 
 # when the "Space" key is pressed.
@@ -34,7 +34,7 @@ def CaptureImages(directory, part=1, tune=False, heuristic=False, twa=False):
     # Open the camera for capture
     # the 0 value should default to the webcam, but you may need to change this
     # for your camera, especially if you are using a camera besides the default
-    cam = cv2.VideoCapture(1)
+    cam = cv2.VideoCapture(0)
     cam.set(cv2.CAP_PROP_AUTO_EXPOSURE, 0.25) # 0.25 turns off auto exp
     cam.set(cv2.CAP_PROP_AUTO_WB, 0.25) # 0.25 turns off auto wb
     # Setting camera resolutions
@@ -66,6 +66,10 @@ def CaptureImages(directory, part=1, tune=False, heuristic=False, twa=False):
     angleAvg = None
 
     img_counter = 0
+    prevArea = 0
+    prevAngle = 0
+    prevCX = 0
+    prevCY = 0
     # Read until user quits
     while True:
         ret, frame = cam.read()
@@ -136,18 +140,12 @@ def CaptureImages(directory, part=1, tune=False, heuristic=False, twa=False):
         # and then apply a bilateral filter so the edges are not affected by noise reduction
         frame = cv2.bilateralFilter(frame, 9, 75, 75) #diameter, sigmaColor for color space, sigmaColor for coordinatespace. larger value for sigma color means colors far apart will mix, and more pixels too.
 
+        if part == 1:
+            cv2.imshow("Display", frame)
+
         # Binarize the image
         gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
         threshold_value = cv2.getTrackbarPos('threshold', window_name)
-
-        """
-        This part produces binarized hand image
-        """
-        if part == 1:
-            ret, thresh = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY_INV+cv2.THRESH_OTSU)
-            # display the current image
-            cv2.imshow("Display", thresh)
-
 
         if part == 2:
             ret, thresh = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY_INV+cv2.THRESH_OTSU)
@@ -168,7 +166,7 @@ def CaptureImages(directory, part=1, tune=False, heuristic=False, twa=False):
                     subImg = labeled_img[y:y+h, x:x+w]
                     subImg = cv2.cvtColor(subImg, cv2.COLOR_BGR2GRAY)
                     # _, contours, _ = cv2.findContours(subImg, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
-                    contours, _ = cv2.findContours(subImg, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
+                    _, contours, _ = cv2.findContours(subImg, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
                     maxCntLength = 0
                     for i in range(0, len(contours)):
                         cntLength = len(contours[i])
@@ -177,10 +175,14 @@ def CaptureImages(directory, part=1, tune=False, heuristic=False, twa=False):
                             maxCntLength = cntLength
                     if (maxCntLength >= 5):
                         ellipseParam = cv2.fitEllipse(cnt)
-                        # (x, y), (MA, ma), angle = ellipseParam
-                        # print("(x, y) = ({}, {}), (MA, ma) = ({}, {}), angle = {}".format(x, y, MA, ma, angle))
-                        # text = "angle: " + str(angle)
-                        # cv2.putText(labeled_img, text, (10, 50), cv2.FONT_HERSHEY_SIMPLEX, 1, (209, 80, 0, 255), 3)
+                        (x, y), (MA, ma), angle = ellipseParam
+                        print("(x, y) = ({}, {}), (MA, ma) = ({}, {}), angle = {}".format(x, y, MA, ma, angle))
+                        text = "(x, y) = ({}, {})".format(x, y)
+                        cv2.putText(labeled_img, text, (10, 50), cv2.FONT_HERSHEY_SIMPLEX, 1, (209, 80, 0, 255), 3)
+                        text = "(MA, ma) = ({}, {})".format(MA, ma)
+                        cv2.putText(labeled_img, text, (10, 100), cv2.FONT_HERSHEY_SIMPLEX, 1, (209, 80, 0, 255), 3)
+                        text = "angle = {}".format(angle)
+                        cv2.putText(labeled_img, text, (10, 150), cv2.FONT_HERSHEY_SIMPLEX, 1, (209, 80, 0, 255), 3)
                         # if part == 4:
                         #     cX = offsetX + scaleX * x
                         #     cY = offsetY + scaleY * y
@@ -201,51 +203,84 @@ def CaptureImages(directory, part=1, tune=False, heuristic=False, twa=False):
         if part == 3 or part == 4:
             ret, thresh = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY+cv2.THRESH_OTSU)
             # _, contours, _ = cv2.findContours(thresh, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
-            contours, _ = cv2.findContours(thresh, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
+            _, contours, _ = cv2.findContours(thresh, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
             contours = sorted(contours, key=cv2.contourArea, reverse=True)
             thresh = cv2.cvtColor(thresh, cv2.COLOR_GRAY2BGR)
             fingerAngles = []
             if len(contours) > 1:
                 largestContour = contours[0]
                 hull = cv2.convexHull(largestContour, returnPoints=False)
-                cv2.drawContours(thresh,[hull],-1,225,3)
-                # for cnt in contours[:1]:
-                #     defects = cv2.convexityDefects(cnt, hull)
-                #     if (not isinstance(defects, type(None))):
-                #         fingerCount = 0
-                #         for i in range(defects.shape[0]):
-                #             s, e, f, d = defects[i, 0]
-                #             start = tuple(cnt[s][0])
-                #             end = tuple(cnt[e][0])
-                #             far = tuple(cnt[f][0])
+                for cnt in contours[:1]:
+                    defects = cv2.convexityDefects(cnt, hull)
+                    if (not isinstance(defects, type(None))):
+                        fingerCount = 0
+                        for i in range(defects.shape[0]):
+                            s, e, f, d = defects[i, 0]
+                            start = tuple(cnt[s][0])
+                            end = tuple(cnt[e][0])
+                            far = tuple(cnt[f][0])
 
-                #             if heuristic:
-                #                 # Defect check
-                #                 c_squared = (end[0] - start[0]) ** 2 + (end[1] - start[1]) ** 2
-                #                 a_squared = (far[0] - start[0]) ** 2 + (far[1] - start[1]) ** 2
-                #                 b_squared = (end[0] - far[0]) ** 2 + (end[1] - far[1]) ** 2
-                #                 angle = np.arccos((a_squared + b_squared - c_squared) / (2 * np.sqrt(a_squared * b_squared)))
+                            if heuristic:
+                                # Defect check
+                                c_squared = (end[0] - start[0]) ** 2 + (end[1] - start[1]) ** 2
+                                a_squared = (far[0] - start[0]) ** 2 + (far[1] - start[1]) ** 2
+                                b_squared = (end[0] - far[0]) ** 2 + (end[1] - far[1]) ** 2
+                                angle = np.arccos((a_squared + b_squared - c_squared) / (2 * np.sqrt(a_squared * b_squared)))
 
-                #                 if angle <= np.pi / 3:
-                #                     fingerAngles.append(angle)
-                #                     fingerCount += 1
-                #                     cv2.line(thresh, start, end, [0, 255, 0], 2)
-                #                     cv2.circle(thresh, far, 4, [0, 0, 255], -1)
-                #             else:
-                #                 cv2.line(thresh, start, end, [0, 255, 0], 2)
-                #                 cv2.circle(thresh, far, 4, [0, 0, 255], -1)
+                                if angle <= np.pi / 3:
+                                    fingerAngles.append(angle)
+                                    fingerCount += 1
+                                    cv2.line(thresh, start, end, [0, 255, 0], 2)
+                                    cv2.circle(thresh, far, 4, [0, 0, 255], -1)
+                            else:
+                                cv2.line(thresh, start, end, [0, 255, 0], 2)
+                                cv2.circle(thresh, far, 4, [0, 0, 255], -1)
 
-                #         text = "Finger count: " + str(fingerCount + int(fingerCount != 0))
-                #         cv2.putText(thresh, text, (10, 50), cv2.FONT_HERSHEY_SIMPLEX, 1, (209, 80, 0, 255), 3)
-                # # Print center coordinates and the area of the contour
-                # if part == 4:
-                #     M = cv2.moments(largestContour)
-                #     cX = offsetX + scaleX * int(M["m10"] / M["m00"])
-                #     cY = offsetY + scaleY * int(M["m01"] / M["m00"])
-                #     pyautogui.moveTo(cX, cY, duration=0.02, tween=pyautogui.easeInOutQuad)
-                #     print(fingerAngles)
-                #     if fingerCount == 2:
-                #         pyautogui.rightClick()
+                        fingerCount = fingerCount + int(fingerCount != 0)
+                        if part == 3:
+                            text = "Finger count: " + str(fingerCount)
+                            cv2.putText(thresh, text, (10, 50), cv2.FONT_HERSHEY_SIMPLEX, 1, (209, 80, 0, 255), 3)
+                # Print center coordinates and the area of the contour
+                if part == 4:
+                    M = cv2.moments(largestContour)
+                    area = cv2.contourArea(largestContour)
+                    cX = offsetX + scaleX * int(M["m10"] / M["m00"])
+                    cY = offsetY + scaleY * int(M["m01"] / M["m00"])
+                    (_, _), (_, _), angle = cv2.fitEllipse(largestContour)
+                    text = "angle: " + str(angle)
+                    cv2.putText(thresh, text, (10, 50), cv2.FONT_HERSHEY_SIMPLEX, 1, (209, 80, 0, 255), 3)
+                    pyautogui.moveTo(cX, cY, duration=0.02, tween=pyautogui.easeInOutQuad)
+                    if fingerCount == 2:
+                        pyautogui.rightClick()
+                    if fingerCount == 3:
+                        pyautogui.click()
+                    if fingerCount == 0:
+                        pyautogui.press('esc')
+                    if isIncreased(area, prevArea, 40000) and np.abs(prevCX - cX) < 200:
+                        ZoomIn()
+                    elif isDecreased(area, prevArea, 40000) and np.abs(prevCX - cX) < 200:
+                        ZoomOut()
+
+                    if isIncreased(angle, prevAngle, 35) and np.abs(prevCX - cX) < 200 and angle < 100:
+                        print("Turn Right")
+                        RotateLeft()
+                    # elif isDecreased(angle, prevAngle, 35) and np.abs(prevCX - cX) < 200:
+                    #     print("Turn Left")
+                    #     RotateRight()
+                    print(cX - prevCX)
+                    if isIncreased(cX, prevCX, 800):
+                        print("next photo")
+                        nextPhoto()
+                    elif isDecreased(cX, prevCX, 800):
+                        prevPhoto()
+
+                    if isIncreased(cY, prevCY, 2000):
+                        pyautogui.press('esc')
+                    
+                    prevArea = area
+                    prevAngle = angle
+                    prevCX = cX
+                    prevCY = cY
                 # logging.info('Center: ({}, {}), Area: {}'.format(cX, cY, M))
             # display the current image
             cv2.imshow("Display", thresh)
@@ -262,6 +297,36 @@ def CaptureImages(directory, part=1, tune=False, heuristic=False, twa=False):
             print("Writing: {}".format(directory+'/'+img_name))
             img_counter += 1
     cam.release()
+
+def isIncreased(area, prevArea, threshold):
+    if area > prevArea + threshold:
+        return True
+    else:
+        return False
+
+def isDecreased(area, prevArea, threshold):
+    if area < prevArea - threshold:
+        return True
+    else:
+        return False
+
+def ZoomIn():
+    pyautogui.hotkey('ctrl', '+')
+
+def ZoomOut():
+    pyautogui.hotkey('ctrl', '-')
+
+def RotateRight():
+    pyautogui.hotkey('ctrl', 'r')
+
+def RotateLeft():
+    pyautogui.hotkey('ctrl', 'r', presses=3)
+
+def nextPhoto():
+    pyautogui.scroll(-1)
+
+def prevPhoto():
+    pyautogui.scroll(1)
 
 def get_args():
     parser = argparse.ArgumentParser(description='CS294-137 HW4 Gesture Recognition')
